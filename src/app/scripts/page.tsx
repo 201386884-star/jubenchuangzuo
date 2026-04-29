@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { FolderOpen, Search, Trash2, Plus, Loader2, Film } from 'lucide-react';
+import { FolderOpen, Search, Trash2, Plus, Loader2, Film, Upload, X } from 'lucide-react';
 import { OutlineDB, ScriptDB } from '@/lib/db';
 import type { StoryOutline, Script } from '@/types';
 
@@ -17,6 +17,13 @@ export default function ScriptsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterGenre, setFilterGenre] = useState('全部');
+
+  // Import modal state
+  const [importModal, setImportModal] = useState(false);
+  const [importMode, setImportMode] = useState<'script' | 'synopsis'>('script');
+  const [importText, setImportText] = useState('');
+  const [importPreview, setImportPreview] = useState<{ parsed: any[]; errors: string[] } | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
 
   const loadProjects = () => {
     setIsLoading(true);
@@ -46,6 +53,157 @@ export default function ScriptsPage() {
     scripts.forEach((s) => ScriptDB.delete(s.id));
     OutlineDB.delete(outlineId);
     loadProjects();
+  };
+
+  // ---- Import Handlers ----
+  const handleImportPreview = () => {
+    const text = importText.trim();
+    if (!text) { alert('请输入内容或上传文件'); return; }
+    setImportLoading(true);
+    const errors: string[] = [];
+
+    if (importMode === 'script') {
+      const rawBlocks = text.split(/(?=【?第\s*\d+\s*集)/);
+      const parsed = rawBlocks.map(block => {
+        const numMatch = block.match(/第\s*(\d+)\s*集/);
+        if (!numMatch) return null;
+        const epNum = parseInt(numMatch[1]);
+        const content = block.replace(/【?第\s*\d+\s*集】?\s*/, '').replace(/【第\d+集完】\s*/g, '').trim();
+        return { episodeNumber: epNum, content };
+      }).filter(Boolean);
+      if (parsed.length === 0) errors.push('未能解析到任何集数，请确保使用【第X集】格式');
+      setImportPreview({ parsed: parsed as any[], errors });
+    } else {
+      try {
+        const trimmed = text.trim();
+        let parsed: any[] = [];
+        if (trimmed.startsWith('[')) {
+          parsed = JSON.parse(trimmed);
+        } else {
+          // TSV格式
+          const lines = trimmed.split('\n').filter(l => l.trim());
+          for (const line of lines) {
+            const parts = line.split('\t');
+            if (parts.length >= 1) {
+              const epNum = parseInt(parts[0]);
+              if (!isNaN(epNum)) {
+                parsed.push({
+                  episodeNumber: epNum,
+                  title: parts[1] || `第${epNum}集`,
+                  synopsis: parts[2] || '',
+                  keyEvent: parts[3] || '',
+                  emotionalBeat: parts[4] || '',
+                });
+              }
+            }
+          }
+        }
+        if (parsed.length === 0) errors.push('未能解析到任何概述，请检查格式');
+        setImportPreview({ parsed, errors });
+      } catch {
+        errors.push('JSON格式解析失败，请检查语法');
+        setImportPreview({ parsed: [], errors });
+      }
+    }
+    setImportLoading(false);
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setImportText(ev.target?.result as string || '');
+      setImportPreview(null);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImportConfirm = () => {
+    if (!importPreview?.parsed.length) return;
+
+    if (importMode === 'script') {
+      // 创建新项目
+      const outline: StoryOutline = {
+        id: `outline-${Date.now()}`,
+        userInput: '导入剧本',
+        genre: '都市',
+        logline: '导入的剧本项目',
+        characters: { protagonist: { name: '角色', trait: '主角', role: 'protagonist' }, antagonist: { name: '反派', trait: '反派', role: 'antagonist' } },
+        worldSetting: '都市',
+        coreConflicts: [],
+        plotStructure: { setup: '', development: '', climax: '', resolution: '' },
+        episodeOutlines: [],
+        paymentPoints: [],
+        emotionalArc: '',
+        createdAt: new Date(),
+      };
+      OutlineDB.create(outline);
+
+      const script: Script = {
+        id: `script-${Date.now()}`,
+        outlineId: outline.id,
+        title: '导入剧本',
+        platform: '抖音',
+        totalEpisodes: importPreview.parsed.length,
+        episodes: importPreview.parsed.map((ep: any) => ({
+          episodeNumber: ep.episodeNumber,
+          scene: '场景',
+          timeOfDay: '日内' as const,
+          content: ep.content,
+          paymentHook: '查看悬念',
+          summary: `第${ep.episodeNumber}集`,
+        })),
+        status: 'complete',
+        aiFlavorLevel: 'none',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      ScriptDB.create(script);
+    } else {
+      // 创建新项目（概述）
+      const outline: StoryOutline = {
+        id: `outline-${Date.now()}`,
+        userInput: '导入概述',
+        genre: '都市',
+        logline: '导入的概述项目',
+        characters: { protagonist: { name: '角色', trait: '主角', role: 'protagonist' }, antagonist: { name: '反派', trait: '反派', role: 'antagonist' } },
+        worldSetting: '都市',
+        coreConflicts: [],
+        plotStructure: { setup: '', development: '', climax: '', resolution: '' },
+        episodeOutlines: importPreview.parsed.map((ep: any) => ({
+          episodeNumber: ep.episodeNumber,
+          title: ep.title || `第${ep.episodeNumber}集`,
+          synopsis: ep.synopsis || '',
+          keyEvent: ep.keyEvent || '',
+          emotionalBeat: ep.emotionalBeat || '',
+        })),
+        paymentPoints: [],
+        emotionalArc: '',
+        createdAt: new Date(),
+      };
+      OutlineDB.create(outline);
+
+      const script: Script = {
+        id: `script-${Date.now()}`,
+        outlineId: outline.id,
+        title: '导入概述',
+        platform: '抖音',
+        totalEpisodes: importPreview.parsed.length,
+        episodes: [],
+        status: 'draft',
+        aiFlavorLevel: 'none',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      ScriptDB.create(script);
+    }
+
+    setImportModal(false);
+    setImportText('');
+    setImportPreview(null);
+    loadProjects();
+    alert('导入成功！');
   };
 
   const genreList = ['全部', '复仇', '甜宠', '穿越', '都市', '古风', '悬疑', '职场', '校园', '玄幻', '家庭'];
@@ -82,6 +240,13 @@ export default function ScriptsPage() {
         >
           <Plus className="w-4 h-4" />
           新建项目
+        </button>
+        <button
+          onClick={() => { setImportModal(true); setImportText(''); setImportPreview(null); setImportMode('script'); }}
+          className="flex items-center gap-2 px-4 py-2.5 border border-purple-200 text-purple-600 rounded-lg text-sm font-medium hover:bg-purple-50 transition-colors"
+        >
+          <Upload className="w-4 h-4" />
+          导入项目
         </button>
       </div>
 
@@ -173,6 +338,97 @@ export default function ScriptsPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {importModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setImportModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-gray-900">导入项目</h3>
+              <button onClick={() => setImportModal(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-lg mb-4">
+              <button onClick={() => { setImportMode('script'); setImportPreview(null); }} className={`flex-1 py-2 text-sm rounded-md transition-colors ${importMode === 'script' ? 'bg-white text-purple-600 shadow-sm font-medium' : 'text-gray-600 hover:text-gray-900'}`}>导入剧本</button>
+              <button onClick={() => { setImportMode('synopsis'); setImportPreview(null); }} className={`flex-1 py-2 text-sm rounded-md transition-colors ${importMode === 'synopsis' ? 'bg-white text-purple-600 shadow-sm font-medium' : 'text-gray-600 hover:text-gray-900'}`}>导入概述</button>
+            </div>
+
+            <div className="flex-1 overflow-hidden flex flex-col">
+              {importMode === 'script' ? (
+                <div className="flex-1 flex flex-col">
+                  <p className="text-xs text-gray-500 mb-3">粘贴剧本内容，每集用【第X集】开头、【第X集完】结尾。导入后将创建为新项目。</p>
+                  <textarea
+                    value={importText}
+                    onChange={(e) => { setImportText(e.target.value); setImportPreview(null); }}
+                    placeholder={'【第1集】\n[零桢画面：...] \n1-1 场景地点 日内\n▶ 动作描写\n角色名（情绪）：台词\n\n【第1集完】\n\n【第2集】\n...\n【第2集完】'}
+                    className="flex-1 w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                    style={{ minHeight: '200px' }}
+                  />
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col">
+                  <p className="text-xs text-gray-500 mb-3">支持JSON数组格式或TSV格式（集号、标题、梗概、核心事件、情绪节拍，tab分隔）。</p>
+                  <textarea
+                    value={importText}
+                    onChange={(e) => { setImportText(e.target.value); setImportPreview(null); }}
+                    placeholder={'JSON格式示例：\n[\n  {"episodeNumber": 1, "title": "第1集标题", "synopsis": "梗概内容"},\n  ...\n]\n\nTSV格式示例：\n1\t第1集标题\t梗概内容\t核心事件\t情绪节拍\n2\t第2集标题\t...'}
+                    className="flex-1 w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                    style={{ minHeight: '200px' }}
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => document.getElementById('import-file-input')?.click()} className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                  <Upload className="w-4 h-4" />上传文件
+                </button>
+                <input id="import-file-input" type="file" accept=".txt,.json,.tsv,.csv" className="hidden" onChange={handleImportFile} />
+                <button onClick={handleImportPreview} disabled={!importText.trim() || importLoading} className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+                  预览解析
+                </button>
+              </div>
+
+              {importLoading && (
+                <div className="text-center py-6 text-gray-500">
+                  <div className="animate-spin w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                  解析中...
+                </div>
+              )}
+
+              {importPreview && !importLoading && (
+                <div className="bg-gray-50 rounded-lg p-3 max-h-40 overflow-y-auto mt-4">
+                  {importPreview.errors.length > 0 && (
+                    <div className="mb-3 p-2 bg-red-50 rounded text-xs text-red-600">
+                      {importPreview.errors.map((err, i) => <p key={i}>{err}</p>)}
+                    </div>
+                  )}
+                  {importPreview.parsed.length > 0 ? (
+                    <div className="space-y-1">
+                      <p className="text-xs text-gray-600 font-medium mb-2">解析结果：{importPreview.parsed.length}集</p>
+                      {importPreview.parsed.map((item: any, i: number) => (
+                        <div key={i} className="text-xs text-gray-600 flex gap-2">
+                          <span className="text-purple-600 font-medium">第{item.episodeNumber}集</span>
+                          <span>{importMode === 'script' ? `${item.content.length}字` : item.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : importPreview.errors.length === 0 ? (
+                    <p className="text-xs text-gray-500">未能解析到任何内容</p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 justify-end mt-4 pt-4 border-t">
+              <button onClick={() => setImportModal(false)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+              <button onClick={handleImportConfirm} disabled={!importPreview?.parsed.length || importLoading} className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
+                确认导入
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

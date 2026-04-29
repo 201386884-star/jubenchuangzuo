@@ -963,8 +963,6 @@ export default function ScriptDetailPage() {
                         {script.episodes.length === 0 ? '开始生成' : '继续生成'}
                       </button>
                       <button onClick={() => handleExportScript(script)} className="flex items-center gap-1.5 px-3 py-2 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-white transition-colors"><Download className="w-3.5 h-3.5" />导出</button>
-                      <button onClick={() => { setImportModal(script.id); setImportText(''); setImportPreview(null); setImportMode('script'); }} className="flex items-center gap-1.5 px-3 py-2 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-white transition-colors"><Upload className="w-3.5 h-3.5" />导入剧本</button>
-                      <button onClick={() => { setImportModal(script.id); setImportText(''); setImportPreview(null); setImportMode('synopsis'); }} className="flex items-center gap-1.5 px-3 py-2 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-white transition-colors"><FileText className="w-3.5 h-3.5" />导入概述</button>
                       <button onClick={() => handleEvaluate(script.id)} disabled={evaluatingScript === script.id} className="flex items-center gap-1.5 px-3 py-2 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-white transition-colors disabled:opacity-50">
                         {evaluatingScript === script.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className="w-3.5 h-3.5" />}AI评估
                       </button>
