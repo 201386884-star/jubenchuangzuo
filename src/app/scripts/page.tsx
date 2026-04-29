@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { FolderOpen, Search, Trash2, Plus, Loader2, Film, Upload, X } from 'lucide-react';
+import { FolderOpen, Search, Trash2, Plus, Loader2, Film, Upload, X, ChevronDown } from 'lucide-react';
 import { OutlineDB, ScriptDB } from '@/lib/db';
 import type { StoryOutline, Script } from '@/types';
 
@@ -25,6 +25,10 @@ export default function ScriptsPage() {
   const [importPreview, setImportPreview] = useState<{ parsed: any[]; errors: string[] } | null>(null);
   const [importLoading, setImportLoading] = useState(false);
 
+  // Continue creation dropdown
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   const loadProjects = () => {
     setIsLoading(true);
     const outlines = OutlineDB.getAll();
@@ -46,6 +50,17 @@ export default function ScriptsPage() {
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownOpen && dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [dropdownOpen]);
 
   const handleDelete = (outlineId: string) => {
     if (!confirm('确定删除该项目？关联的所有方案也会一起删除。')) return;
@@ -124,9 +139,8 @@ export default function ScriptsPage() {
 
     if (importMode === 'script') {
       // 创建新项目
-      const outline: StoryOutline = {
-        id: `outline-${Date.now()}`,
-        userInput: '导入剧本',
+      const basicOutline = OutlineDB.create('导入剧本');
+      OutlineDB.update(basicOutline.id, {
         genre: '都市',
         logline: '导入的剧本项目',
         characters: { protagonist: { name: '角色', trait: '主角', role: 'protagonist' }, antagonist: { name: '反派', trait: '反派', role: 'antagonist' } },
@@ -136,16 +150,15 @@ export default function ScriptsPage() {
         episodeOutlines: [],
         paymentPoints: [],
         emotionalArc: '',
-        createdAt: new Date(),
-      };
-      OutlineDB.create(outline);
+      });
 
-      const script: Script = {
-        id: `script-${Date.now()}`,
-        outlineId: outline.id,
-        title: '导入剧本',
-        platform: '抖音',
-        totalEpisodes: importPreview.parsed.length,
+      const createdScript = ScriptDB.create(
+        basicOutline.id,
+        '导入剧本',
+        '抖音' as const,
+        importPreview.parsed.length
+      );
+      ScriptDB.update(createdScript.id, {
         episodes: importPreview.parsed.map((ep: any) => ({
           episodeNumber: ep.episodeNumber,
           scene: '场景',
@@ -156,15 +169,11 @@ export default function ScriptsPage() {
         })),
         status: 'complete',
         aiFlavorLevel: 'none',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      ScriptDB.create(script);
+      });
     } else {
       // 创建新项目（概述）
-      const outline: StoryOutline = {
-        id: `outline-${Date.now()}`,
-        userInput: '导入概述',
+      const basicOutline = OutlineDB.create('导入概述');
+      OutlineDB.update(basicOutline.id, {
         genre: '都市',
         logline: '导入的概述项目',
         characters: { protagonist: { name: '角色', trait: '主角', role: 'protagonist' }, antagonist: { name: '反派', trait: '反派', role: 'antagonist' } },
@@ -180,23 +189,19 @@ export default function ScriptsPage() {
         })),
         paymentPoints: [],
         emotionalArc: '',
-        createdAt: new Date(),
-      };
-      OutlineDB.create(outline);
+      });
 
-      const script: Script = {
-        id: `script-${Date.now()}`,
-        outlineId: outline.id,
-        title: '导入概述',
-        platform: '抖音',
-        totalEpisodes: importPreview.parsed.length,
+      const synopsisScript = ScriptDB.create(
+        basicOutline.id,
+        '导入概述',
+        '抖音' as const,
+        importPreview.parsed.length
+      );
+      ScriptDB.update(synopsisScript.id, {
         episodes: [],
         status: 'draft',
         aiFlavorLevel: 'none',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      ScriptDB.create(script);
+      });
     }
 
     setImportModal(false);
@@ -241,13 +246,50 @@ export default function ScriptsPage() {
           <Plus className="w-4 h-4" />
           新建项目
         </button>
-        <button
-          onClick={() => { setImportModal(true); setImportText(''); setImportPreview(null); setImportMode('script'); }}
-          className="flex items-center gap-2 px-4 py-2.5 border border-purple-200 text-purple-600 rounded-lg text-sm font-medium hover:bg-purple-50 transition-colors"
-        >
-          <Upload className="w-4 h-4" />
-          导入项目
-        </button>
+        {/* Continue Creation Dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setDropdownOpen(!dropdownOpen);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 border border-purple-200 text-purple-600 rounded-lg text-sm font-medium hover:bg-purple-50 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            继续创作
+            <ChevronDown className={`w-4 h-4 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {dropdownOpen && (
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-100 py-1 z-50">
+              <button
+                onClick={() => {
+                  setImportModal(true);
+                  setImportText('');
+                  setImportPreview(null);
+                  setImportMode('script');
+                  setDropdownOpen(false);
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2"
+              >
+                <Film className="w-4 h-4" />
+                导入剧本
+              </button>
+              <button
+                onClick={() => {
+                  setImportModal(true);
+                  setImportText('');
+                  setImportPreview(null);
+                  setImportMode('synopsis');
+                  setDropdownOpen(false);
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2"
+              >
+                <FolderOpen className="w-4 h-4" />
+                导入概述
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Search & Filter */}
