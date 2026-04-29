@@ -22,7 +22,15 @@ export default function ScriptsPage() {
   const [importModal, setImportModal] = useState(false);
   const [importMode, setImportMode] = useState<'script' | 'synopsis'>('script');
   const [importText, setImportText] = useState('');
-  const [importPreview, setImportPreview] = useState<{ parsed: any[]; errors: string[] } | null>(null);
+  const [importPreview, setImportPreview] = useState<{
+    parsed: any[];
+    errors: string[];
+    healthReport?: {
+      status: 'good' | 'warning' | 'error';
+      message: string;
+      issues: { type: string; description: string; level: 'error' | 'warning' | 'info' }[];
+    };
+  } | null>(null);
   const [importLoading, setImportLoading] = useState(false);
 
   // Continue creation dropdown
@@ -71,6 +79,108 @@ export default function ScriptsPage() {
   };
 
   // ---- Import Handlers ----
+  // Health check for imported content
+  const generateHealthReport = (
+    parsed: any[],
+    errors: string[],
+    mode: 'script' | 'synopsis'
+  ): NonNullable<typeof importPreview>['healthReport'] => {
+    const issues: { type: string; description: string; level: 'error' | 'warning' | 'info' }[] = [];
+
+    if (errors.length > 0) {
+      errors.forEach(e => issues.push({ type: 'parse_error', description: e, level: 'error' }));
+    }
+
+    if (parsed.length === 0) {
+      return {
+        status: 'error',
+        message: '无法解析内容',
+        issues: [{ type: 'no_content', description: '未能解析到任何有效内容', level: 'error' }],
+      };
+    }
+
+    // Episode count check
+    if (parsed.length < 10) {
+      issues.push({ type: 'episode_count', description: `集数较少（${parsed.length}集），可能影响用户留存`, level: 'warning' });
+    } else if (parsed.length > 100) {
+      issues.push({ type: 'episode_count', description: `集数偏多（${parsed.length}集），建议控制在合理范围`, level: 'info' });
+    }
+
+    if (mode === 'script') {
+      // Check for zero frames in scripts (empty content)
+      const emptyEpisodes = parsed.filter((ep: any) => !ep.content || ep.content.trim().length < 50);
+      if (emptyEpisodes.length > 0) {
+        issues.push({
+          type: 'zero_frames',
+          description: `${emptyEpisodes.length}集内容过少（<50字），可能被平台标记为低质量`,
+          level: 'warning',
+        });
+      }
+
+      // Check for proper episode numbering
+      const episodeNumbers = parsed.map((ep: any) => ep.episodeNumber).filter((n: number) => !isNaN(n));
+      const missingNumbers: number[] = [];
+      for (let i = 1; i <= parsed.length; i++) {
+        if (!episodeNumbers.includes(i)) missingNumbers.push(i);
+      }
+      if (missingNumbers.length > 0) {
+        issues.push({
+          type: 'missing_episodes',
+          description: `缺少集数：第${missingNumbers.slice(0, 3).join('、')}集${missingNumbers.length > 3 ? '...' : ''}`,
+          level: 'warning',
+        });
+      }
+
+      // Check content quality indicators
+      const avgLength = parsed.reduce((sum: number, ep: any) => sum + (ep.content?.length || 0), 0) / parsed.length;
+      if (avgLength < 200) {
+        issues.push({ type: 'short_content', description: `平均每集仅${Math.round(avgLength)}字，内容偏短可能影响完播率`, level: 'info' });
+      }
+
+      // Check for emotion annotations (AI味检测相关)
+      const hasEmotionMarkers = parsed.some((ep: any) =>
+        ep.content?.includes('【') && ep.content?.includes('】') &&
+        (ep.content?.includes('情绪') || ep.content?.includes('转折') || ep.content?.includes('爽点'))
+      );
+      if (hasEmotionMarkers) {
+        issues.push({
+          type: 'ai_markers',
+          description: '检测到AI写作标记（如【情绪】【转折】等），建议后续使用去AI味处理',
+          level: 'info',
+        });
+      }
+    } else {
+      // Synopsis mode checks
+      const missingSynopses = parsed.filter((ep: any) => !ep.synopsis || ep.synopsis.trim().length < 20);
+      if (missingSynopses.length > parsed.length * 0.3) {
+        issues.push({
+          type: 'incomplete_synopses',
+          description: `${missingSynopses.length}集缺少概述或概述过短`,
+          level: 'warning',
+        });
+      }
+
+      const missingKeyEvents = parsed.filter((ep: any) => !ep.keyEvent || ep.keyEvent.trim().length < 10);
+      if (missingKeyEvents.length > parsed.length * 0.5) {
+        issues.push({
+          type: 'missing_key_events',
+          description: `${missingKeyEvents.length}集缺少关键事件描述`,
+          level: 'warning',
+        });
+      }
+    }
+
+    // Determine overall status
+    const hasErrors = issues.some(i => i.level === 'error');
+    const hasWarnings = issues.some(i => i.level === 'warning');
+
+    return {
+      status: hasErrors ? 'error' : hasWarnings ? 'warning' : 'good',
+      message: hasErrors ? '存在格式问题，请检查' : hasWarnings ? '格式基本正确，有几处可优化' : '格式良好，可直接导入',
+      issues,
+    };
+  };
+
   const handleImportPreview = () => {
     const text = importText.trim();
     if (!text) { alert('请输入内容或上传文件'); return; }
@@ -87,7 +197,8 @@ export default function ScriptsPage() {
         return { episodeNumber: epNum, content };
       }).filter(Boolean);
       if (parsed.length === 0) errors.push('未能解析到任何集数，请确保使用【第X集】格式');
-      setImportPreview({ parsed: parsed as any[], errors });
+      const healthReport = generateHealthReport(parsed as any[], errors, 'script');
+      setImportPreview({ parsed: parsed as any[], errors, healthReport });
     } else {
       try {
         const trimmed = text.trim();
@@ -114,7 +225,8 @@ export default function ScriptsPage() {
           }
         }
         if (parsed.length === 0) errors.push('未能解析到任何概述，请检查格式');
-        setImportPreview({ parsed, errors });
+        const healthReport = generateHealthReport(parsed, errors, 'synopsis');
+        setImportPreview({ parsed, errors, healthReport });
       } catch {
         errors.push('JSON格式解析失败，请检查语法');
         setImportPreview({ parsed: [], errors });
@@ -460,6 +572,49 @@ export default function ScriptsPage() {
                   ) : importPreview.errors.length === 0 ? (
                     <p className="text-xs text-gray-500">未能解析到任何内容</p>
                   ) : null}
+
+                  {/* Health Report */}
+                  {importPreview.healthReport && (
+                    <div className={`mt-3 p-3 rounded-lg border ${
+                      importPreview.healthReport.status === 'good' ? 'bg-green-50 border-green-200' :
+                      importPreview.healthReport.status === 'warning' ? 'bg-yellow-50 border-yellow-200' :
+                      'bg-red-50 border-red-200'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`w-2 h-2 rounded-full ${
+                          importPreview.healthReport.status === 'good' ? 'bg-green-500' :
+                          importPreview.healthReport.status === 'warning' ? 'bg-yellow-500' :
+                          'bg-red-500'
+                        }`} />
+                        <span className={`text-xs font-medium ${
+                          importPreview.healthReport.status === 'good' ? 'text-green-700' :
+                          importPreview.healthReport.status === 'warning' ? 'text-yellow-700' :
+                          'text-red-700'
+                        }`}>
+                          {importPreview.healthReport.message}
+                        </span>
+                      </div>
+                      {importPreview.healthReport.issues.length > 0 && (
+                        <div className="space-y-1">
+                          {importPreview.healthReport.issues.slice(0, 3).map((issue, i) => (
+                            <div key={i} className={`text-xs ${
+                              issue.level === 'error' ? 'text-red-600' :
+                              issue.level === 'warning' ? 'text-yellow-700' :
+                              'text-gray-600'
+                            }`}>
+                              <span className="mr-1">•</span>
+                              {issue.description}
+                            </div>
+                          ))}
+                          {importPreview.healthReport.issues.length > 3 && (
+                            <p className="text-xs text-gray-500">
+                              还有{importPreview.healthReport.issues.length - 3}项提示...
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
