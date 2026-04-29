@@ -40,6 +40,7 @@ export default function ScriptDetailPage() {
 
   // Regeneration state
   const [regeneratingFrom, setRegeneratingFrom] = useState<{ scriptId: string; fromEp: number } | null>(null);
+  const [regeneratingSingle, setRegeneratingSingle] = useState<{ scriptId: string; epNum: number } | null>(null);
   const [regenConfig, setRegenConfig] = useState('');
 
   // Comparison state
@@ -498,15 +499,21 @@ export default function ScriptDetailPage() {
 
   // ---- Regenerate single episode ----
   const handleRegenerateSingle = (scriptId: string, epNum: number) => {
-    if (!outline) return;
+    setRegeneratingSingle({ scriptId, epNum });
+  };
+
+  const confirmRegenerateSingle = () => {
+    if (!regeneratingSingle || !outline) return;
     const config = apiConfigs.find(c => c.id === (batchConfig || apiConfigs[0]?.id));
     if (!config) { alert('请先在设置页面配置 API'); return; }
-    const script = scripts.find(s => s.id === scriptId);
+    const script = scripts.find(s => s.id === regeneratingSingle.scriptId);
     if (!script) return;
+    const guidanceInput = document.getElementById('single-regen-guidance') as HTMLTextAreaElement;
+    const userGuidance = guidanceInput?.value?.trim() || undefined;
 
-    const existingEpisodes = script.episodes.filter(ep => ep.episodeNumber !== epNum);
-    const prevEp = script.episodes.find(ep => ep.episodeNumber === epNum - 1)
-      || existingEpisodes.filter(ep => ep.episodeNumber < epNum).pop();
+    const existingEpisodes = script.episodes.filter(ep => ep.episodeNumber !== regeneratingSingle.epNum);
+    const prevEp = script.episodes.find(ep => ep.episodeNumber === regeneratingSingle.epNum - 1)
+      || existingEpisodes.filter(ep => ep.episodeNumber < regeneratingSingle.epNum).pop();
 
     addTask({
       id: newTaskId(), type: 'generate-script', status: 'pending', progress: 0,
@@ -515,17 +522,19 @@ export default function ScriptDetailPage() {
       params: {
         apiConfig: config, outline, totalEpisodes: script.totalEpisodes, platform: script.platform,
         scriptIndex: 1, totalScripts: 1,
-        startFrom: epNum, endAt: epNum,
+        startFrom: regeneratingSingle.epNum, endAt: regeneratingSingle.epNum,
         existingEpisodes,
         previousSummary: prevEp?.summary || '',
-        _scriptId: scriptId,
-        _replaceEpisodes: true, // 标记：替换已有集数
+        _scriptId: regeneratingSingle.scriptId,
+        _replaceEpisodes: true,
+        userGuidance,
       },
       scriptIndex: 1, totalScripts: 1,
-      label: `[${outline?.title || '剧本'}] 重新生成第${epNum}集`,
+      label: `[${outline?.title || '剧本'}] 重新生成第${regeneratingSingle.epNum}集`,
     });
 
-    alert('已提交重新生成第' + epNum + '集任务');
+    setRegeneratingSingle(null);
+    alert('已提交重新生成第' + regeneratingSingle.epNum + '集任务');
   };
 
   // ---- Evaluation ----
@@ -1100,7 +1109,7 @@ export default function ScriptDetailPage() {
                                     {isGenerated && generatedEp && (
                                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                         <button onClick={(e) => { e.stopPropagation(); startEditEpisode(script.id, generatedEp); }} className="p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50" title="编辑本集"><Pencil className="w-3 h-3" /></button>
-                                        <button onClick={(e) => { e.stopPropagation(); handleRegenerateSingle(script.id, epNum); }} className="p-1 rounded text-gray-400 hover:text-orange-600 hover:bg-orange-50" title="重新生成本集"><RefreshCw className="w-3 h-3" /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleRegenerateSingle(script.id, epNum); }} className="p-1 rounded text-gray-400 hover:text-orange-600 hover:bg-orange-50" title="重新生成本集（带描述）"><RefreshCw className="w-3 h-3" /></button>
                                         <button onClick={(e) => { e.stopPropagation(); startRegenerate(script.id, epNum); }} className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50" title="从本集开始重新生成到结尾"><RefreshCw className="w-3 h-3 rotate-90" /></button>
                                         <button onClick={(e) => { e.stopPropagation(); setDeaiEpisode({ scriptId: script.id, epNumber: epNum }); }} className="p-1 rounded text-gray-400 hover:text-purple-600 hover:bg-purple-50" title="剧本润色"><Wand2 className="w-3 h-3" /></button>
                                         <button onClick={(e) => { e.stopPropagation(); handleDetectAI(script.id, generatedEp); }} disabled={!!detectingEpisode} className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 disabled:opacity-50" title="朱雀AI检测">
@@ -1175,6 +1184,64 @@ export default function ScriptDetailPage() {
             <div className="flex gap-3 justify-end">
               <button onClick={() => setRegeneratingFrom(null)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
               <button onClick={confirmRegenerate} className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700">确认重新生成</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Single Episode Regenerate Modal */}
+      {regeneratingSingle && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setRegeneratingSingle(null)}>
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">重新生成第{regeneratingSingle.epNum}集</h3>
+            <p className="text-sm text-gray-500 mb-4">将重新生成第{regeneratingSingle.epNum}集的内容，其他集保持不变。</p>
+            <div className="mb-4">
+              <label className="text-xs text-gray-600 mb-1 block">选择模型</label>
+              <select value={batchConfig} onChange={(e) => setBatchConfig(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                {apiConfigs.map((c) => <option key={c.id} value={c.id}>{c.name || c.model}</option>)}
+              </select>
+            </div>
+            <div className="mb-4">
+              <label className="text-xs text-gray-600 mb-1 block">创作方向建议（可选）</label>
+              <textarea
+                id="single-regen-guidance"
+                placeholder="例如：要加强情绪表达、反派要更嚣张、本集要加入反转..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setRegeneratingSingle(null)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+              <button onClick={confirmRegenerateSingle} className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700">确认重新生成</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Single Episode Regenerate Modal */}
+      {regeneratingSingle && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setRegeneratingSingle(null)}>
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">重新生成第{regeneratingSingle.epNum}集</h3>
+            <p className="text-sm text-gray-500 mb-4">将重新生成第{regeneratingSingle.epNum}集的内容，其他集保持不变。</p>
+            <div className="mb-4">
+              <label className="text-xs text-gray-600 mb-1 block">选择模型</label>
+              <select value={batchConfig} onChange={(e) => setBatchConfig(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                {apiConfigs.map((c) => <option key={c.id} value={c.id}>{c.name || c.model}</option>)}
+              </select>
+            </div>
+            <div className="mb-4">
+              <label className="text-xs text-gray-600 mb-1 block">创作方向建议（可选）</label>
+              <textarea
+                id="single-regen-guidance"
+                placeholder="例如：要加强情绪表达、反派要更嚣张、本集要加入反转..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setRegeneratingSingle(null)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+              <button onClick={confirmRegenerateSingle} className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700">确认重新生成</button>
             </div>
           </div>
         </div>
