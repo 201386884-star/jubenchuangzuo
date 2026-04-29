@@ -470,6 +470,8 @@ export default function ScriptDetailPage() {
     if (!config) return;
     const script = scripts.find(s => s.id === regeneratingFrom.scriptId);
     if (!script) return;
+    const guidanceInput = document.getElementById('regen-guidance') as HTMLTextAreaElement;
+    const userGuidance = guidanceInput?.value?.trim() || undefined;
 
     // Keep episodes before the regeneration point
     const keptEpisodes = script.episodes.filter(ep => ep.episodeNumber < regeneratingFrom.fromEp);
@@ -484,6 +486,7 @@ export default function ScriptDetailPage() {
         scriptIndex: 1, totalScripts: 1, startFromEpisode: regeneratingFrom.fromEp,
         existingEpisodes: keptEpisodes, previousSummary,
         _scriptId: regeneratingFrom.scriptId,
+        userGuidance,
       },
       scriptIndex: 1, totalScripts: 1,
       label: `[${outline?.title || '剧本'}] 从第${regeneratingFrom.fromEp}集重新生成...`,
@@ -1159,6 +1162,15 @@ export default function ScriptDetailPage() {
               <select value={regenConfig} onChange={(e) => setRegenConfig(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
                 {apiConfigs.map((c) => <option key={c.id} value={c.id}>{c.name || c.model}</option>)}
               </select>
+            </div>
+            <div className="mb-4">
+              <label className="text-xs text-gray-600 mb-1 block">创作方向建议（可选）</label>
+              <textarea
+                id="regen-guidance"
+                placeholder="例如：要加强情绪表达、反派要更嚣张、第3集要加入爱情线..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-none"
+                rows={3}
+              />
             </div>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setRegeneratingFrom(null)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
