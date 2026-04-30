@@ -15,6 +15,199 @@ import { addTask, newTaskId, getTasks, updateTask, removeTask } from '@/lib/task
 import '@/lib/use-task-queue';
 import type { StoryOutline, Script, EpisodeScript, Genre, Platform, ScriptEvaluation } from '@/types';
 
+const OUTLINE_BLOCK_HEADINGS = ['故事梗概', '世界观', '核心冲突', '人物小传', '故事线', '分集概述', '付费点', '情绪走向', '预计爆点'];
+const CHARACTER_LABELS: Record<string, keyof StoryOutline['characters']> = {
+  主角: 'protagonist',
+  反派: 'antagonist',
+  助攻: 'supporter',
+  感情线: 'loveInterest',
+  二号反派: 'secondaryVillain',
+  导师: 'mentor',
+};
+const CHARACTER_ROLES: Record<keyof StoryOutline['characters'], string> = {
+  protagonist: 'protagonist',
+  antagonist: 'antagonist',
+  supporter: 'supporter',
+  loveInterest: 'love_interest',
+  secondaryVillain: 'antagonist',
+  mentor: 'supporter',
+};
+
+function splitOutlineSections(text: string) {
+  const sections: Record<string, string[]> = { _top: [] };
+  let current = '_top';
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const headingMatch = line.match(/^(.+?)[：:]\s*$/);
+    if (headingMatch && OUTLINE_BLOCK_HEADINGS.includes(headingMatch[1])) {
+      current = headingMatch[1];
+      sections[current] = [];
+      continue;
+    }
+    sections[current].push(rawLine);
+  }
+
+  return Object.fromEntries(Object.entries(sections).map(([key, lines]) => [key, lines.join('\n').trim()]));
+}
+
+function readInlineField(text: string, label: string) {
+  return text.match(new RegExp(`^${label}[：:]\\s*(.+)$`, 'm'))?.[1]?.trim();
+}
+
+function listFromBlock(block = '') {
+  return block
+    .split(/\r?\n/)
+    .map(line => line.replace(/^\s*[-*•]\s*/, '').trim())
+    .filter(Boolean);
+}
+
+function formatOutlineForEditing(outline: StoryOutline) {
+  const genre = Array.isArray(outline.genre) ? outline.genre.join(' / ') : outline.genre;
+  const characters = Object.entries(outline.characters)
+    .map(([role, char]) => {
+      if (!char) return '';
+      const label = Object.entries(CHARACTER_LABELS).find(([, key]) => key === role)?.[0] || role;
+      return `${label}：${char.name || ''} ｜ ${char.trait || ''} ｜ ${char.backstory || char.goal || char.motivation || char.arc || ''}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+  const episodeOutlines = (outline.episodeOutlines || [])
+    .map(ep => `第${ep.episodeNumber}集｜${ep.title || ''}｜${ep.synopsis || ''}｜${ep.keyEvent || ''}｜${ep.emotionalBeat || ''}`)
+    .join('\n');
+
+  return [
+    `剧名：${outline.title || ''}`,
+    `类型：${genre}`,
+    `一句话简介：${outline.logline || ''}`,
+    '',
+    '故事梗概：',
+    outline.synopsis || '',
+    '',
+    '世界观：',
+    outline.worldSetting || '',
+    '',
+    '核心冲突：',
+    ...(outline.coreConflicts || []).map(item => `- ${item}`),
+    '',
+    '人物小传：',
+    characters,
+    '',
+    '故事线：',
+    `开端：${outline.plotStructure?.setup || ''}`,
+    `发展：${outline.plotStructure?.development || ''}`,
+    `高潮：${outline.plotStructure?.climax || ''}`,
+    `结局：${outline.plotStructure?.resolution || ''}`,
+    '',
+    '分集概述：',
+    episodeOutlines,
+    '',
+    '付费点：',
+    (outline.paymentPoints || []).join(', '),
+    '',
+    '情绪走向：',
+    outline.emotionalArc || '',
+    '',
+    '预计爆点：',
+    ...(outline.buzzScenes || []).map(item => `- ${item}`),
+  ].join('\n');
+}
+
+function parsePlainOutlineDraft(text: string, current: StoryOutline): Partial<StoryOutline> {
+  const sections = splitOutlineSections(text);
+  const top = sections._top || '';
+  const genreText = readInlineField(top, '类型');
+  const characters = { ...current.characters };
+  const characterLines = listFromBlock(sections['人物小传']);
+
+  for (const line of characterLines) {
+    const match = line.match(/^(.+?)[：:]\s*(.+)$/);
+    if (!match) continue;
+    const key = CHARACTER_LABELS[match[1].trim()];
+    if (!key) continue;
+    const [name = '', trait = '', story = ''] = match[2].split(/[｜|]/).map(part => part.trim());
+    if (!name && !trait && !story) continue;
+    const previous = characters[key];
+    characters[key] = {
+      ...(previous || { role: CHARACTER_ROLES[key] as any }),
+      name,
+      trait,
+      role: (previous?.role || CHARACTER_ROLES[key]) as any,
+      backstory: story || previous?.backstory,
+    };
+  }
+
+  const storyLine = sections['故事线'] || '';
+  const episodeOutlines = listFromBlock(sections['分集概述']).map(line => {
+    const cleaned = line.replace(/^\s*[-*•]\s*/, '');
+    const parts = cleaned.split(/[｜|]/).map(part => part.trim());
+    const numberMatch = parts[0]?.match(/第?\s*(\d+)\s*集?/);
+    if (!numberMatch) return null;
+    return {
+      episodeNumber: Number(numberMatch[1]),
+      title: parts[1] || '',
+      synopsis: parts[2] || '',
+      keyEvent: parts[3] || '',
+      emotionalBeat: parts[4] || '',
+    };
+  }).filter(Boolean) as NonNullable<StoryOutline['episodeOutlines']>;
+  const paymentPoints = (sections['付费点'] || '')
+    .match(/\d+/g)
+    ?.map(Number)
+    .filter(num => Number.isFinite(num)) || [];
+  const buzzScenes = listFromBlock(sections['预计爆点']);
+  const coreConflicts = listFromBlock(sections['核心冲突']);
+
+  return {
+    title: readInlineField(top, '剧名') || current.title,
+    genre: genreText ? (genreText.includes('/') ? genreText.split('/').map(g => g.trim()).filter(Boolean) as Genre[] : genreText as Genre) : current.genre,
+    logline: readInlineField(top, '一句话简介') || current.logline,
+    synopsis: sections['故事梗概'] || current.synopsis,
+    worldSetting: sections['世界观'] || current.worldSetting,
+    coreConflicts: coreConflicts.length > 0 ? coreConflicts : current.coreConflicts,
+    characters,
+    plotStructure: {
+      setup: readInlineField(storyLine, '开端') || current.plotStructure?.setup || '',
+      development: readInlineField(storyLine, '发展') || current.plotStructure?.development || '',
+      climax: readInlineField(storyLine, '高潮') || current.plotStructure?.climax || '',
+      resolution: readInlineField(storyLine, '结局') || current.plotStructure?.resolution || '',
+    },
+    episodeOutlines: episodeOutlines.length > 0 ? episodeOutlines : current.episodeOutlines,
+    paymentPoints: paymentPoints.length > 0 ? paymentPoints : current.paymentPoints,
+    emotionalArc: sections['情绪走向'] || current.emotionalArc,
+    buzzScenes: buzzScenes.length > 0 ? buzzScenes : current.buzzScenes,
+  };
+}
+
+function buildReanalysisInput(outline: StoryOutline, scripts: Script[]) {
+  const generatedEpisodes = scripts
+    .flatMap(script => script.episodes.map(ep => ({
+      scriptTitle: script.title,
+      episodeNumber: ep.episodeNumber,
+      summary: ep.summary,
+      content: ep.content,
+      paymentHook: ep.paymentHook,
+    })))
+    .sort((a, b) => a.episodeNumber - b.episodeNumber)
+    .slice(0, 120)
+    .map(ep => [
+      `【${ep.scriptTitle} 第${ep.episodeNumber}集】`,
+      ep.summary || ep.content.slice(0, 240),
+      ep.paymentHook ? `付费钩子：${ep.paymentHook}` : '',
+    ].filter(Boolean).join('\n'))
+    .join('\n\n');
+
+  return [
+    '请基于下面已有项目资料，重新分析并整理成更完整的短剧创作大纲。',
+    '重点补足：故事大纲、人物小传、每集概述、主线/副线/感情线、核心冲突、付费点、情绪走向。',
+    '保持原有故事方向，不要重启一个全新故事。',
+    '',
+    '【当前大纲】',
+    formatOutlineForEditing(outline),
+    generatedEpisodes ? `\n【已生成剧集资料】\n${generatedEpisodes}` : '',
+  ].join('\n');
+}
+
 export default function ScriptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -32,6 +225,7 @@ export default function ScriptDetailPage() {
   const [apiConfigs, setApiConfigs] = useState<ApiConfig[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [evaluations, setEvaluations] = useState<Record<string, ScriptEvaluation>>({});
+  const [isReanalyzingOutline, setIsReanalyzingOutline] = useState(false);
 
   // Episode editing state
   const [editingEpisode, setEditingEpisode] = useState<{ scriptId: string; epNumber: number } | null>(null);
@@ -375,17 +569,59 @@ export default function ScriptDetailPage() {
   const handleSaveOutline = () => {
     if (!outline) return;
     try {
-      const parsed = JSON.parse(editDraft);
-      OutlineDB.update(outline.id, { ...parsed, genre: parsed.genre || outline.genre, paymentPoints: parsed.paymentPoints || outline.paymentPoints });
+      const parsed = parsePlainOutlineDraft(editDraft, outline);
+      OutlineDB.update(outline.id, parsed);
       loadData();
       setIsEditingOutline(false);
-    } catch { alert('JSON 格式错误，请检查后重试'); }
+    } catch { alert('大纲内容解析失败，请检查人物小传或分集概述的格式'); }
   };
 
   const startEditOutline = () => {
     if (!outline) return;
-    setEditDraft(JSON.stringify(outline, null, 2));
+    setEditDraft(formatOutlineForEditing(outline));
     setIsEditingOutline(true);
+  };
+
+  const handleReanalyzeOutline = async () => {
+    if (!outline) return;
+    const config = apiConfigs[0];
+    if (!config?.apiKey) {
+      alert('请先在设置页面配置 API Key');
+      return;
+    }
+
+    setIsReanalyzingOutline(true);
+    try {
+      const primaryScript = scripts[0];
+      const response = await fetch('/api/generate-outline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userInput: buildReanalysisInput(outline, scripts),
+          genre: Array.isArray(outline.genre) ? outline.genre[0] : outline.genre,
+          platform: primaryScript?.platform || 'ReelShort',
+          totalEpisodes: primaryScript?.totalEpisodes || outline.episodeOutlines?.length || 50,
+          apiConfig: config,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.outline) {
+        throw new Error(data.error || '重新分析失败');
+      }
+
+      OutlineDB.update(outline.id, {
+        ...data.outline,
+        id: outline.id,
+        userInput: outline.userInput,
+        createdAt: outline.createdAt,
+      });
+      loadData();
+      alert('重新分析完成，大纲已更新');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '重新分析失败');
+    } finally {
+      setIsReanalyzingOutline(false);
+    }
   };
 
   // ---- Script management ----
@@ -819,15 +1055,29 @@ export default function ScriptDetailPage() {
                 <button onClick={() => setIsEditingOutline(false)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"><X className="w-3.5 h-3.5" />取消</button>
               </>
             ) : (
-              <button onClick={startEditOutline} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"><Edit3 className="w-3.5 h-3.5" />编辑大纲</button>
+              <>
+                <button
+                  onClick={handleReanalyzeOutline}
+                  disabled={isReanalyzingOutline}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-purple-200 rounded-lg text-xs text-purple-600 hover:bg-purple-50 transition-colors disabled:opacity-50"
+                >
+                  {isReanalyzingOutline ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  重新分析
+                </button>
+                <button onClick={startEditOutline} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"><Edit3 className="w-3.5 h-3.5" />编辑大纲</button>
+              </>
             )}
           </div>
         </div>
         <div className="p-5">
           {isEditingOutline ? (
             <div>
-              <p className="text-xs text-gray-500 mb-2">以 JSON 格式编辑大纲内容：</p>
-              <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)} className="w-full h-96 p-4 border border-gray-200 rounded-lg text-xs font-mono resize-y focus:outline-none focus:border-purple-300" />
+              <p className="text-xs text-gray-500 mb-2">直接修改下面文本即可。人物用“姓名｜特质｜小传”，分集用“第1集｜标题｜梗概｜核心事件｜情绪节拍”。</p>
+              <textarea
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                className="w-full h-[34rem] p-4 border border-gray-200 rounded-lg text-sm leading-6 resize-y focus:outline-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100"
+              />
             </div>
           ) : (
             <div className="space-y-4">
