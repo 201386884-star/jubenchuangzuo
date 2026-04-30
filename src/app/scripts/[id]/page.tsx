@@ -217,6 +217,27 @@ function getReanalysisEpisodeCount(outline: StoryOutline, scripts: Script[]) {
   return outline.episodeOutlines?.length || 50;
 }
 
+function parseImportedScriptEpisodes(text: string) {
+  const starts: { episodeNumber: number; start: number; contentStart: number }[] = [];
+  const startRegex = /(^|\n)\s*【?\s*第\s*(\d+)\s*集\s*】?(?!\s*完)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = startRegex.exec(text)) !== null) {
+    starts.push({
+      episodeNumber: Number(match[2]),
+      start: match.index + (match[1]?.length || 0),
+      contentStart: match.index + match[0].length,
+    });
+  }
+
+  return starts.map((current, index) => {
+    const nextStart = starts[index + 1]?.start ?? text.length;
+    const endMarker = new RegExp(`\\s*【?\\s*第\\s*${current.episodeNumber}\\s*集\\s*完\\s*】?\\s*$`);
+    const content = text.slice(current.contentStart, nextStart).replace(endMarker, '').trim();
+    return { episodeNumber: current.episodeNumber, content };
+  }).filter(ep => ep.content);
+}
+
 export default function ScriptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -850,22 +871,7 @@ export default function ScriptDetailPage() {
 
     if (importMode === 'script') {
       // 解析剧本格式：支持【第X集】或 第X集 开头，【第X集完】或 第X集完 结尾
-      const episodeBlocks: { episodeNumber: number; content: string }[] = [];
-      // 用正则匹配集数分隔
-      const regex = /(?:【?第\s*(\d+)\s*集[】　 ]*|(?<=\n)\s*(\d+)[-　](?=\s))/g;
-      const rawBlocks = text.split(/(?=【?第\s*\d+\s*集)/);
-      for (const block of rawBlocks) {
-        const numMatch = block.match(/第\s*(\d+)\s*集/);
-        if (!numMatch) continue;
-        const epNum = parseInt(numMatch[1]);
-        // 去掉结尾的【第X集完】标记
-        const content = block
-          .replace(/【?\s*第\s*\d+\s*集\s*完\s*】?\s*$/g, '')
-          .replace(/【?\s*第\s*\d+\s*集\s*】?\s*/, '')
-          .trim();
-        if (!content) { errors.push(`第${epNum}集内容为空`); continue; }
-        episodeBlocks.push({ episodeNumber: epNum, content });
-      }
+      const episodeBlocks = parseImportedScriptEpisodes(text);
 
       if (episodeBlocks.length === 0) {
         errors.push('未识别到任何集数，请确保使用【第X集】或 第X集 格式标记');
