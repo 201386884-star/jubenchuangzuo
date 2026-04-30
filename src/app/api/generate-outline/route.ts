@@ -7,7 +7,7 @@ import type { StoryOutline, Genre, Platform } from '@/types';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userInput, genre, platform, totalEpisodes, apiConfig } = body;
+    const { userInput, genre, platform, totalEpisodes, apiConfig, strictAnalysis } = body;
 
     if (!userInput?.trim()) {
       return NextResponse.json({ success: false, error: '请输入故事描述' }, { status: 400 });
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请先在设置页面配置 API Key' }, { status: 400 });
     }
 
-    const prompt = generateOutlinePrompt({ userInput, genre, platform, totalEpisodes });
+    const prompt = generateOutlinePrompt({ userInput, genre, platform, totalEpisodes, strictAnalysis });
 
     const result = await chatWithConfig({
       baseUrl: apiConfig.baseUrl,

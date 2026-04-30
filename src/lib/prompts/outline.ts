@@ -16,9 +16,10 @@ interface OutlinePromptOptions {
   genre?: Genre;
   platform?: string;
   totalEpisodes?: number;
+  strictAnalysis?: boolean;
 }
 
-export function generateOutlinePrompt({ userInput, genre, platform = 'ReelShort', totalEpisodes = 50 }: OutlinePromptOptions): string {
+export function generateOutlinePrompt({ userInput, genre, platform = 'ReelShort', totalEpisodes = 50, strictAnalysis = false }: OutlinePromptOptions): string {
   const paymentBP = getPaymentBlueprint(totalEpisodes);
   const paymentBPText = paymentBP.map(p => `  ${p.range}【${p.stage}】${p.desc} → 目标：${p.goal}`).join('\n');
 
@@ -29,7 +30,24 @@ export function generateOutlinePrompt({ userInput, genre, platform = 'ReelShort'
     return `  【${cat.name}】\n${subs}`;
   }).join('\n\n');
 
+  const strictAnalysisRules = strictAnalysis ? `
+## 导入剧本严格复盘模式
+
+本次任务不是创作、续写、润色或优化，而是对用户导入/已有剧本做结构化复盘。
+
+硬性规则：
+1. 只能依据“用户创意”中的导入剧本原文和现有资料提取信息。
+2. 禁止新增角色、事件、伏笔、感情线、爽点、付费点、结局或世界观。
+3. 禁止为了满足爆款公式而改写、补写、合理化原剧本没有写明的内容。
+4. 未在剧本中明确出现的信息，必须写“未在剧本中明确”，不要猜。
+5. episodeOutlines 只分析导入剧本中实际存在的集数；每集概述必须对应原文剧情，不要扩展后续集。
+6. title、logline、synopsis、characters、plotStructure、coreConflicts、paymentPoints、emotionalArc、buzzScenes 都必须来自剧本文本，不得额外加工剧情。
+7. 可以归纳结构和标签，但不能改变原剧情含义。
+` : '';
+
   return `你是一位操盘过30+部播放量破亿爆款短剧的顶级策划总监，精通红果、抖音等主流平台的算法规则与用户心理。
+
+${strictAnalysisRules}
 
 ## 用户创意
 "${userInput}"
@@ -171,7 +189,8 @@ ${COMPLIANCE_RULES.map((r, i) => `${i + 1}. ${r}`).join('\n')}
 4. characters 的 goldenFinger 必须包含限制/代价，不能无限开挂
 5. hookChain 必须说明主线悬念如何逐层揭露、环环相扣
 6. 所有内容必须过合规审核，不踩红线
-7. **输出务必精简，episodeOutlines 每集 synopsis 不超过30字**`;
+7. **输出务必精简，episodeOutlines 每集 synopsis 不超过30字**
+${strictAnalysis ? '8. 严格复盘模式下，如果导入剧本实际集数少于目标集数，只输出实际存在的集数，绝对不要补齐不存在的集数。' : ''}`;
 }
 
 export function parseOutlineResponse(response: string): any {

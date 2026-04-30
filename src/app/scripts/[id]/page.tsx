@@ -180,7 +180,7 @@ function parsePlainOutlineDraft(text: string, current: StoryOutline): Partial<St
 }
 
 function buildReanalysisInput(outline: StoryOutline, scripts: Script[]) {
-  const generatedEpisodes = scripts
+  const sourceEpisodes = scripts
     .flatMap(script => script.episodes.map(ep => ({
       scriptTitle: script.title,
       episodeNumber: ep.episodeNumber,
@@ -188,24 +188,33 @@ function buildReanalysisInput(outline: StoryOutline, scripts: Script[]) {
       content: ep.content,
       paymentHook: ep.paymentHook,
     })))
-    .sort((a, b) => a.episodeNumber - b.episodeNumber)
-    .slice(0, 120)
+    .filter(ep => ep.content?.trim())
+    .sort((a, b) => a.episodeNumber - b.episodeNumber || a.scriptTitle.localeCompare(b.scriptTitle));
+
+  const importedScriptText = sourceEpisodes
     .map(ep => [
       `【${ep.scriptTitle} 第${ep.episodeNumber}集】`,
-      ep.summary || ep.content.slice(0, 240),
+      ep.content.trim(),
+      ep.summary ? `本集摘要：${ep.summary}` : '',
       ep.paymentHook ? `付费钩子：${ep.paymentHook}` : '',
     ].filter(Boolean).join('\n'))
     .join('\n\n');
 
   return [
-    '请基于下面已有项目资料，重新分析并整理成更完整的短剧创作大纲。',
-    '重点补足：故事大纲、人物小传、每集概述、主线/副线/感情线、核心冲突、付费点、情绪走向。',
-    '保持原有故事方向，不要重启一个全新故事。',
+    '【任务：导入剧本严格复盘】',
+    '请严格按照下面导入/已有剧本原文进行分析，只做提取和归纳。',
+    '不要新增剧情，不要补充未出现的设定，不要优化人物动机，不要续写后续集，不要修改原剧情含义。',
+    '人物小传、每集概述、故事线、核心冲突、付费点、情绪走向，都必须能在剧本原文中找到依据。',
+    '未在剧本中明确出现的信息，请写“未在剧本中明确”。',
     '',
-    '【当前大纲】',
-    formatOutlineForEditing(outline),
-    generatedEpisodes ? `\n【已生成剧集资料】\n${generatedEpisodes}` : '',
+    importedScriptText ? `【导入/已有剧本原文】\n${importedScriptText}` : `【当前大纲】\n${formatOutlineForEditing(outline)}`,
   ].join('\n');
+}
+
+function getReanalysisEpisodeCount(outline: StoryOutline, scripts: Script[]) {
+  const episodeNumbers = scripts.flatMap(script => script.episodes.map(ep => ep.episodeNumber));
+  if (episodeNumbers.length > 0) return Math.max(...episodeNumbers);
+  return outline.episodeOutlines?.length || 50;
 }
 
 export default function ScriptDetailPage() {
@@ -600,8 +609,9 @@ export default function ScriptDetailPage() {
           userInput: buildReanalysisInput(outline, scripts),
           genre: Array.isArray(outline.genre) ? outline.genre[0] : outline.genre,
           platform: primaryScript?.platform || 'ReelShort',
-          totalEpisodes: primaryScript?.totalEpisodes || outline.episodeOutlines?.length || 50,
+          totalEpisodes: getReanalysisEpisodeCount(outline, scripts),
           apiConfig: config,
+          strictAnalysis: true,
         }),
       });
       const data = await response.json();
