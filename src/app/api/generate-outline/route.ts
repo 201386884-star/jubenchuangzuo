@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateOutlinePrompt, parseOutlineResponse } from '@/lib/prompts/outline';
+import { generateOutlinePrompt, parseOutlineResponse, generateFixedOutlinePrompt } from '@/lib/prompts/outline';
 import { chatWithConfig } from '@/lib/chat-with-config';
 import { nanoid } from 'nanoid';
 import type { StoryOutline, Genre, Platform } from '@/types';
@@ -7,7 +7,7 @@ import type { StoryOutline, Genre, Platform } from '@/types';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userInput, genre, platform, totalEpisodes, apiConfig } = body;
+    const { userInput, genre, platform, totalEpisodes, apiConfig, fixedOutline } = body;
 
     if (!userInput?.trim()) {
       return NextResponse.json({ success: false, error: '请输入故事描述' }, { status: 400 });
@@ -17,7 +17,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请先在设置页面配置 API Key' }, { status: 400 });
     }
 
-    const prompt = generateOutlinePrompt({ userInput, genre, platform, totalEpisodes });
+    // 根据模式选择不同的 prompt 生成方式
+    let prompt: string;
+    if (fixedOutline) {
+      // 固定大纲模式：简洁直接，仅结构化分析
+      prompt = generateFixedOutlinePrompt({ userInput, genre, platform, totalEpisodes });
+    } else {
+      // 深度模式：完整行业知识注入
+      prompt = generateOutlinePrompt({ userInput, genre, platform, totalEpisodes });
+    }
 
     const result = await chatWithConfig({
       baseUrl: apiConfig.baseUrl,

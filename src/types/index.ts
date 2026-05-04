@@ -83,6 +83,20 @@ export interface StoryOutline {
 
 // -------------------- 剧本 --------------------
 
+// -------------------- 连贯性锚点 --------------------
+
+export interface EpisodeAnchor {
+  episodeNumber: number;
+  characterStates: { name: string; state: string; description: string }[];
+  relationships: { characterA: string; characterB: string; relation: string; description: string }[];
+  keyFacts: { fact: string; knownBy: string[]; description: string }[];
+  foreshadows: { description: string; episode: number }[];
+  unresolvedHooks: { description: string; episode: number }[];
+  summary: string;  // 本集摘要
+}
+
+// -------------------- 剧本 --------------------
+
 export interface EpisodeScript {
   episodeNumber: number;
   scene: string;              // 场景描述
@@ -90,6 +104,7 @@ export interface EpisodeScript {
   content: string;            // 剧本内容（对话+动作）
   paymentHook: string;        // 付费点悬念
   summary: string;            // 本集摘要（用于下一集前情）
+  anchors?: EpisodeAnchor;   // 提炼的连贯性锚点
   isComplete?: boolean;       // 是否包含【第x集完】标记
 }
 

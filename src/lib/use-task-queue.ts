@@ -1,6 +1,7 @@
 // ============================================================
 // 后台生成管理器 —— 页面切换后任务继续运行
 // 使用 BroadcastChannel 跨页面通信 + localStorage 持久化
+// 支持连贯性锚点系统，跨集追踪人物状态、关系、事实等
 // ============================================================
 
 'use client';
@@ -8,6 +9,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { getTasks, updateTask, saveTasks, type BackgroundTask } from '@/lib/task-queue';
 import { DeAIDB } from '@/lib/deai-db';
+import { extractAnchorsFromEpisode, formatAnchorsSummary, type CoherenceAnchors } from '@/lib/coherence';
 
 // BroadcastChannel 实例（跨页面实时推送）
 let deaiChannel: BroadcastChannel | null = null;
@@ -58,10 +60,53 @@ if (typeof window !== 'undefined') {
 
     // 逐集生成
     const episodes: any[] = [...existingEpisodes];
+
+    // 连贯性锚点积累
+    let accumulatedAnchors: CoherenceAnchors = {
+      characterStates: [],
+      relationships: [],
+      facts: [],
+      foreshadows: [],
+      emotionalBeats: [],
+      hooks: [],
+      newCharacterStates: [],
+      newRelationships: [],
+      newFacts: [],
+      newForeshadows: [],
+      newEmotionalBeats: [],
+      newHooks: [],
+    };
+
+    // 从已有剧集提取锚点
+    for (const ep of existingEpisodes) {
+      if (ep.anchors) {
+        accumulatedAnchors.characterStates.push(...(ep.anchors.characterStates || []).map((s: any) => ({
+          name: s.name, state: s.state, description: s.description,
+        })));
+        accumulatedAnchors.relationships.push(...(ep.anchors.relationships || []).map((r: any) => ({
+          characterA: r.characterA, characterB: r.characterB, relation: r.relation, description: r.description,
+        })));
+        accumulatedAnchors.facts.push(...(ep.anchors.keyFacts || []).map((f: any) => ({
+          fact: f.fact, knownBy: f.knownBy, description: f.description,
+        })));
+        accumulatedAnchors.foreshadows.push(...(ep.anchors.foreshadows || []));
+        accumulatedAnchors.hooks.push(...(ep.anchors.unresolvedHooks || []));
+      }
+    }
+
     // 获取前情：用最后已有的集数的完整内容（而非摘要），确保衔接
     let previousContent = initialSummary
       || (episodes.length > 0 ? episodes[episodes.length - 1].content : '');
     let previousSummary = episodes.length > 0 ? episodes[episodes.length - 1].summary : '';
+
+    // 收集所有角色名（用于锚点提取）
+    const characterNames = [
+      outline?.characters?.protagonist?.name,
+      outline?.characters?.antagonist?.name,
+      outline?.characters?.supporter?.name,
+      outline?.characters?.loveInterest?.name,
+      outline?.characters?.secondaryVillain?.name,
+    ].filter(Boolean) as string[];
 
     for (let i = startFrom; i <= actualEndAt; i++) {
       // 检查任务是否被取消
@@ -102,6 +147,16 @@ if (typeof window !== 'undefined') {
           previousSummary: previousSummary || undefined,
           userGuidance: userGuidance || undefined,
           episodeDuration: outline?.episodeDuration,
+          // 连贯性锚点：从第2集开始传入前几集积累的锚点
+          coherenceAnchors: i > 1 ? {
+            characterStates: accumulatedAnchors.characterStates.slice(-10),
+            relationships: accumulatedAnchors.relationships.slice(-8),
+            keyFacts: accumulatedAnchors.facts.slice(-5),
+            unresolvedHooks: accumulatedAnchors.hooks.slice(-3),
+            pendingForeshadows: accumulatedAnchors.foreshadows.slice(-3),
+          } : undefined,
+          // 完整上下文摘要（用于衔接）
+          fullContextSummary: i > 1 ? formatAnchorsSummary(accumulatedAnchors) : undefined,
         }),
       }, 600000);
 
@@ -163,6 +218,37 @@ if (typeof window !== 'undefined') {
       episodes.push(episode);
       previousContent = episode.content;
       previousSummary = episode.summary;
+
+      // 提取本集连贯性锚点，用于后续剧集衔接
+      if (characterNames.length > 0) {
+        const episodeAnchors = extractAnchorsFromEpisode(episode.content, i, characterNames);
+        // 将新锚点映射并存储到剧集
+        episode.anchors = {
+          episodeNumber: i,
+          characterStates: episodeAnchors.newCharacterStates.map(s => ({
+            name: s.characterName, state: s.stateType, description: s.description,
+          })),
+          relationships: episodeAnchors.newRelationships.map(r => ({
+            characterA: r.characterA, characterB: r.characterB, relation: r.relationshipType, description: r.description,
+          })),
+          keyFacts: episodeAnchors.newFacts.map(f => ({
+            fact: f.fact, knownBy: f.knownBy, description: f.description,
+          })),
+          foreshadows: episodeAnchors.newForeshadows.map(f => ({
+            description: f.description, episode: f.episodeNumber,
+          })),
+          unresolvedHooks: episodeAnchors.newHooks.map(h => ({
+            description: h.description, episode: h.episodeNumber,
+          })),
+          summary: episode.summary,
+        };
+        // 积累锚点供后续剧集使用
+        accumulatedAnchors.characterStates.push(...episodeAnchors.newCharacterStates);
+        accumulatedAnchors.relationships.push(...episodeAnchors.newRelationships);
+        accumulatedAnchors.facts.push(...episodeAnchors.newFacts);
+        accumulatedAnchors.foreshadows.push(...episodeAnchors.newForeshadows);
+        accumulatedAnchors.hooks.push(...episodeAnchors.newHooks);
+      }
 
       // 广播：本集完成
       try {

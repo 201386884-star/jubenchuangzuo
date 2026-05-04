@@ -196,3 +196,71 @@ function cleanJson(str: string): string {
   s = s.replace(/,\s*([\]}])/g, '$1');
   return s;
 }
+
+// ============================================================
+// 固定大纲模式 Prompt（简洁直接，仅结构化分析）
+// ============================================================
+
+interface FixedOutlineOptions {
+  userInput: string;
+  genre?: string;
+  platform?: string;
+  totalEpisodes?: number;
+}
+
+export function generateFixedOutlinePrompt({ userInput, genre, platform = 'ReelShort', totalEpisodes = 50 }: FixedOutlineOptions): string {
+  // 固定付费点
+  const defaultPaymentPoints = totalEpisodes <= 30
+    ? [5, 10, 20]
+    : totalEpisodes <= 60
+    ? [8, 12, 25, 40, 50]
+    : [8, 12, 25, 40, 55, 70, totalEpisodes - 5];
+
+  return `你是一位短剧大纲策划。请根据用户输入的创意，直接结构化输出大纲，不要扩展和过度发挥。
+
+## 用户创意
+"${userInput}"
+
+${genre ? `类型：${genre}` : ''}
+
+---
+直接输出 JSON 格式大纲，只包含核心要素：
+
+{
+  "title": "剧名（简短，6字内）",
+  "genre": "${genre || '都市'}",
+  "logline": "一句话核心冲突（20字内）",
+  "synopsis": "故事梗概（100字内）",
+  "formula": "故事路线（用→连接关键阶段）",
+  "characters": {
+    "protagonist": {
+      "name": "主角名",
+      "gender": "男/女",
+      "trait": "核心性格（2-3个词）",
+      "goldenFinger": "金手指能力+限制"
+    },
+    "antagonist": {
+      "name": "反派名",
+      "trait": "核心性格"
+    }
+  },
+  "worldSetting": "故事背景（10字内）",
+  "coreConflicts": ["核心冲突1", "核心冲突2"],
+  "episodeOutlines": [
+    {"episodeNumber": 1, "title": "第1集标题", "synopsis": "本集核心事件（15字内）"},
+    {"episodeNumber": 2, "title": "第2集标题", "synopsis": "本集核心事件（15字内）"},
+    {"episodeNumber": 3, "title": "第3集标题", "synopsis": "本集核心事件（15字内）"}
+    ... 直到第${totalEpisodes}集
+  ],
+  "paymentPoints": ${JSON.stringify(defaultPaymentPoints)},
+  "emotionalArc": "压制→释放节奏描述（20字内）",
+  "buzzScenes": ["爆点场面1", "爆点场面2"]
+}
+
+要求：
+1. 严格遵循用户输入的核心创意，不做过度扩展
+2. episodeOutlines 每集 synopsis 不超过20字
+3. 主角必须有金手指，但要有代价/限制
+4. 反派要有足够的威胁性
+5. 输出纯 JSON，不要额外说明`;
+}

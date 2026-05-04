@@ -376,10 +376,17 @@ export default function ScriptDetailPage() {
     if (!outline) return;
     try {
       const parsed = JSON.parse(editDraft);
-      OutlineDB.update(outline.id, { ...parsed, genre: parsed.genre || outline.genre, paymentPoints: parsed.paymentPoints || outline.paymentPoints });
+      // Preserve id and createdAt from the original outline, merge all parsed fields
+      const updates = {
+        ...outline,      // start with all existing fields as base
+        ...parsed,      // override with any changed fields from JSON editor
+        id: outline.id,  // ensure id cannot be changed
+        createdAt: outline.createdAt, // preserve original creation date
+      };
+      OutlineDB.update(outline.id, updates);
       loadData();
       setIsEditingOutline(false);
-    } catch { alert('JSON 格式错误，请检查后重试'); }
+    } catch (e) { console.error('[handleSaveOutline] error:', e); alert('JSON 格式错误，请检查后重试'); }
   };
 
   const startEditOutline = () => {

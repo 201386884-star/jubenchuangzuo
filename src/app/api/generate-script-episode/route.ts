@@ -4,7 +4,7 @@ import { chatStream } from '@/lib/chat-with-config';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { outline, episodeNumber, totalEpisodes, platform, apiConfig, previousContent, previousSummary, userGuidance, episodeDuration } = body;
+  const { outline, episodeNumber, totalEpisodes, platform, apiConfig, previousContent, previousSummary, userGuidance, episodeDuration, coherenceAnchors, fullContextSummary } = body;
 
   if (!outline?.logline && !outline?.title) {
     return new Response(JSON.stringify({ success: false, error: '缺少故事大纲' }), { status: 400 });
@@ -56,6 +56,9 @@ export async function POST(request: NextRequest) {
     episodeOutline: outline.episodeOutlines?.find?.((ep: any) => ep.episodeNumber === episodeNumber),
     nextEpisodeOutline: outline.episodeOutlines?.find?.((ep: any) => ep.episodeNumber === episodeNumber + 1),
     episodeDuration: episodeDuration || outline.episodeDuration || 1,
+    // 连贯性锚点系统
+    coherenceAnchors,
+    fullContextSummary,
   });
 
   // SSE 流式响应

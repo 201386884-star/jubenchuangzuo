@@ -16,6 +16,7 @@ interface StoryInputProps {
     orientation: 'vertical' | 'horizontal';
     platform: string;
     modelProvider: string;
+    fixedOutline: boolean;  // 固定大纲模式
   }) => void;
   isLoading: boolean;
 }
@@ -41,6 +42,7 @@ export default function StoryInput({ onSubmit, isLoading }: StoryInputProps) {
   const [platform, setPlatform] = useState('红果短剧');
   const [modelProvider, setModelProvider] = useState('anthropic');
   const [models, setModels] = useState<ApiConfig[]>([]);
+  const [fixedOutline, setFixedOutline] = useState(false);
 
   useEffect(() => {
     const configs = loadApiConfigs();
@@ -63,6 +65,7 @@ export default function StoryInput({ onSubmit, isLoading }: StoryInputProps) {
       orientation,
       platform,
       modelProvider,
+      fixedOutline,
     });
   };
 
@@ -232,12 +235,35 @@ export default function StoryInput({ onSubmit, isLoading }: StoryInputProps) {
         </div>
       </div>
 
+      {/* 固定大纲开关 */}
+      <div className="flex items-center gap-3">
+        <label className="text-xs font-medium text-gray-500">创作模式</label>
+        <button
+          type="button"
+          onClick={() => setFixedOutline(!fixedOutline)}
+          disabled={isLoading}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+            fixedOutline
+              ? 'bg-purple-600 text-white border-purple-600'
+              : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          固定大纲
+        </button>
+        {fixedOutline && (
+          <span className="text-[11px] text-purple-600">仅根据大纲分析，不自动扩展世界观和角色深度</span>
+        )}
+      </div>
+
       {/* 按钮 */}
       <Button type="submit" size="lg" className="w-full" disabled={isLoading || !userInput.trim()}>
         {isLoading ? (
           <><Loader2 className="mr-2 h-4 w-4 animate-spin" />生成中...</>
         ) : (
-          <><Sparkles className="mr-2 h-4 w-4" />生成剧本</>
+          <><Sparkles className="mr-2 h-4 w-4" />{fixedOutline ? '快速生成' : '生成剧本'}</>
         )}
       </Button>
     </form>

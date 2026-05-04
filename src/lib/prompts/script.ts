@@ -1,5 +1,5 @@
 // ============================================================
-// 剧本生成 Prompt V2（竖屏分镜格式 + 状态追踪 + 钩子链版）
+// 剧本生成 Prompt V2（竖屏分镜格式 + 状态追踪 + 钩子链版 + 连贯性锚点版）
 // ============================================================
 
 interface ScriptPromptOptions {
@@ -34,6 +34,16 @@ interface ScriptPromptOptions {
     keyEvent: string;
   };
   episodeDuration?: number;    // 每集时长（分钟）
+  // 连贯性锚点
+  coherenceAnchors?: {
+    characterStates?: { name: string; state: string; description: string }[];
+    relationships?: { characterA: string; characterB: string; relation: string; description: string }[];
+    keyFacts?: { fact: string; knownBy: string[]; description: string }[];
+    unresolvedHooks?: { description: string; episode: number }[];
+    pendingForeshadows?: { description: string; episode: number }[];
+  };
+  // 完整前情摘要（包含连贯性锚点）
+  fullContextSummary?: string;
 }
 
 export function generateScriptPrompt(options: ScriptPromptOptions): string {
@@ -113,6 +123,45 @@ ${characters.supporter ? `**助攻** ${characters.supporter.name}：${characters
 ${characters.loveInterest ? `**爱人** ${characters.loveInterest.name}：${characters.loveInterest.trait}` : ''}
 ${characters.secondaryVillain ? `**次反派** ${characters.secondaryVillain.name}：${characters.secondaryVillain.trait}` : ''}`.trim();
 
+  // 生成连贯性锚点提醒
+  const coherenceSection = (() => {
+    if (!options.coherenceAnchors) return '';
+    const ca = options.coherenceAnchors;
+    const parts: string[] = [];
+
+    if (ca.characterStates?.length) {
+      parts.push('### 人物当前状态（不要自相矛盾！）');
+      for (const s of ca.characterStates.slice(-5)) {
+        parts.push(`- ${s.name}：${s.state}`);
+      }
+    }
+    if (ca.relationships?.length) {
+      parts.push('### 角色关系（记住当前关系！）');
+      for (const r of ca.relationships.slice(-5)) {
+        parts.push(`- ${r.characterA}与${r.characterB}：${r.relation}`);
+      }
+    }
+    if (ca.keyFacts?.length) {
+      parts.push('### 已知关键事实（不要遗忘或矛盾！）');
+      for (const f of ca.keyFacts.slice(-5)) {
+        parts.push(`- ${f.fact}`);
+      }
+    }
+    if (ca.unresolvedHooks?.length) {
+      parts.push('### 未解决悬念（可以推进解决）');
+      for (const h of ca.unresolvedHooks.slice(-3)) {
+        parts.push(`- 第${h.episode}集悬念：${h.description}`);
+      }
+    }
+    if (ca.pendingForeshadows?.length) {
+      parts.push('### 之前埋下的伏笔（可以选择回收）');
+      for (const p of ca.pendingForeshadows.slice(-3)) {
+        parts.push(`- 第${p.episode}集伏笔：${p.description}`);
+      }
+    }
+    return parts.length > 0 ? `## ⚡ 连贯性锚点提醒（必须遵守！）\n${parts.join('\n')}\n` : '';
+  })();
+
   return `你是一位爆款短剧编剧，代表作播放量破10亿。你精通竖屏短剧的「黄金3秒法则」、「钩子链传递」、「爽点密度公式」。
 
 ⚠️ 字数铁律（最高优先级）：本集正文必须控制在${targetWordCount}字左右（允许范围${Math.round(targetWordCount * 0.85)}-${Math.round(targetWordCount * 1.15)}字）。超出范围直接退稿！
@@ -153,7 +202,11 @@ ${episodeOutline ? `## 本集大纲规划\n- 标题：${episodeOutline.title}\n-
 ${options.nextEpisodeOutline ? `## ⚠️ 下一集预告（仅供参考衔接方向，不要写进本集！）\n- 下集标题：${options.nextEpisodeOutline.title}\n- 下集梗概：${options.nextEpisodeOutline.synopsis}\n- 下集核心事件：${options.nextEpisodeOutline.keyEvent}\n- 注意：以上信息仅用于本集结尾如何为下集埋伏笔，本集不要提前展开下集的剧情！\n` : ''}
 ${userGuidance ? `## 创作方向（用户建议）\n${userGuidance}\n` : ''}
 ${nextPaymentEp ? `## 节奏提示\n下一付费墙在第${nextPaymentEp}集，本集需要开始铺设悬念\n` : ''}
-${isPaymentPoint ? `## ⚠️ 本集是第${paymentIndex + 1}个付费墙！\n结尾必须制造超级强悬念！强度是普通集的3倍！必须在"真相即将揭露"或"情绪最高涨"的瞬间戛然而止！\n` : ''}
+${isPaymentPoint ? `## ⚠️ 本集是第${paymentIndex + 1}个付费墙！
+结尾必须制造超级强悬念！强度是普通集的3倍！必须在"真相即将揭露"或"情绪最高涨"的瞬间戛然而止！
+` : ''}
+${coherenceSection}
+${options.fullContextSummary ? `## 📋 完整前情（含连贯性锚点）\n${options.fullContextSummary}\n` : ''}
 
 ---
 

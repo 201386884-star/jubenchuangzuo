@@ -53,6 +53,7 @@ export default function Home() {
     orientation: 'vertical' | 'horizontal';
     platform: string;
     modelProvider: string;
+    fixedOutline: boolean;
   }) => {
     setIsLoading(true);
     setError(null);
@@ -62,7 +63,7 @@ export default function Home() {
       const selectedConfig = getApiConfigById(data.modelProvider);
       if (!selectedConfig?.apiKey) throw new Error('请先在设置页面配置 API Key');
 
-      setProgressLabel('正在生成大纲...');
+      setProgressLabel(data.fixedOutline ? '快速生成大纲中...' : '正在生成大纲...');
       setProgress(10);
 
       const outlineRes = await fetch('/api/generate-outline', {
@@ -75,6 +76,7 @@ export default function Home() {
           totalEpisodes: data.episodes,
           episodeDuration: data.episodeDuration,
           apiConfig: selectedConfig,
+          fixedOutline: data.fixedOutline,
         }),
       });
       const outlineData = await outlineRes.json();
